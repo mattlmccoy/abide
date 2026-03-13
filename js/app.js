@@ -4,7 +4,7 @@
 
 (function () {
   'use strict';
-  const APP_VERSION = '2026.03.13.1';
+  const APP_VERSION = '2026.03.13.2';
   window.__ABIDE_VERSION__ = APP_VERSION;
   window.__ABIDE_SW_VERSION__ = `v${APP_VERSION}`;
 
