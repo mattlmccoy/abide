@@ -5,8 +5,10 @@
 const JournalView = (() => {
   let saveTimeout = null;
   let openPastDate = '';
+  let openPastChatId = '';
   let syncingHistory = false;
   let currentPrompt = '';
+  let savingAskChat = false;
 
   function escapeHtml(text = '') {
     return String(text)
@@ -29,6 +31,7 @@ const JournalView = (() => {
     const devotionData = Store.getTodayDevotionData();
     const existingEntry = Store.getJournalEntry(today);
     const pastEntries = Store.getAllJournalEntries().filter(e => e.date !== today);
+    const savedAskChats = Store.getAllAskBibleChats();
     const streak = Store.get('currentStreak');
     const googleConnected = !!Store.get('googleProfile');
 
@@ -128,6 +131,42 @@ const JournalView = (() => {
             <p class="empty-state__title">No past entries yet</p>
             <p class="empty-state__description">Your reflections will appear here as you write each day.</p>
           </div>`}
+
+        <div class="section-header" style="margin-top:18px;">
+          <span class="section-title">Saved Ask the Bible Chats ${savedAskChats.length ? `(${savedAskChats.length})` : ''}</span>
+        </div>
+        ${savedAskChats.length ? savedAskChats.map(chat => {
+          const isOpen = openPastChatId === chat.id;
+          const messageCount = Array.isArray(chat.messages) ? chat.messages.length : 0;
+          const firstUser = (chat.messages || []).find(m => m.role === 'user')?.content || '';
+          return `
+          <div class="journal-past-item">
+            <div class="journal-past-item__date">${DateUtils.format(chat.dateKey || DateUtils.today())} · ${messageCount} messages</div>
+            <div class="journal-saved-chat__title">${escapeHtml(chat.title || 'Saved conversation')}</div>
+            ${chat.subtitle ? `<div class="journal-saved-chat__subtitle">${escapeHtml(chat.subtitle)}</div>` : ''}
+            ${firstUser ? `<div class="journal-past-item__preview ${isOpen ? 'journal-past-item__preview--open' : ''}">${escapeHtml(firstUser)}</div>` : ''}
+            ${isOpen ? `
+              <div class="journal-saved-chat__messages">
+                ${(chat.messages || []).map((message) => `
+                  <div class="journal-saved-chat__message">
+                    <span class="journal-saved-chat__role">${message.role === 'user' ? 'You' : 'Abide'}</span>
+                    <span>${escapeHtml(message.content || '')}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm" onclick="JournalView.toggleSavedChat('${escapeAttr(chat.id)}')">${isOpen ? 'Collapse' : 'Open'}</button>
+              <button class="btn btn-secondary btn-sm" onclick="JournalView.loadSavedChat('${escapeAttr(chat.id)}')">Continue</button>
+              <button class="btn btn-secondary btn-sm" onclick="JournalView.deleteAskChat('${escapeAttr(chat.id)}')">Delete</button>
+            </div>
+          </div>
+        `;
+        }).join('') : `
+          <div class="empty-state" style="padding: var(--space-6) var(--space-5);">
+            <p class="empty-state__title">No saved chats yet</p>
+            <p class="empty-state__description">Save an Ask the Bible thread to revisit it here later.</p>
+          </div>`}
       </div>
 
       <!-- Ask the Bible -->
@@ -163,6 +202,13 @@ const JournalView = (() => {
               <polygon points="22 2 15 22 11 13 2 9 22 2"/>
             </svg>
           </button>
+        </div>
+        <div class="journal-ask-actions">
+          <div class="journal-ask-actions__meta" id="journal-ask-meta">${getAskMetaText()}</div>
+          <div class="journal-ask-actions__buttons">
+            <button class="btn btn-secondary btn-sm" id="journal-ask-reset-btn" onclick="JournalView.resetAskChat()" ${_askLoading || !_askHistory.length ? 'disabled' : ''}>New chat</button>
+            <button class="btn btn-primary btn-sm" id="journal-ask-save-btn" onclick="JournalView.saveAskChat()" ${savingAskChat || _askLoading || _askHistory.length < 2 ? 'disabled' : ''}>${_askSavedChatId ? 'Update saved' : 'Save chat'}</button>
+          </div>
         </div>
       </div>
     `;
@@ -274,8 +320,70 @@ const JournalView = (() => {
     return DateUtils.format(DateUtils.toKey(then), 'short');
   }
 
+  function getAskMetaText() {
+    if (savingAskChat) return 'Saving conversation...';
+    if (!_askHistory.length) return 'Start a thread, then save it to your journal.';
+    if (_askSavedChatId && !_askDirty) {
+      const saved = Store.getAskBibleChat(_askSavedChatId);
+      return saved?.savedAt ? `Saved ${formatRelative(saved.savedAt)}` : 'Saved';
+    }
+    if (_askSavedChatId && _askDirty) return 'Unsaved changes in this saved conversation.';
+    return 'This thread is only on this device until you save it.';
+  }
+
+  function buildFallbackAskSummary(messages = []) {
+    const firstUser = messages.find(message => message.role === 'user')?.content || '';
+    const assistantReply = messages.find(message => message.role === 'assistant')?.content || '';
+    const cleanQuestion = firstUser.replace(/\s+/g, ' ').trim();
+    const titleBase = cleanQuestion
+      .replace(/^what does the bible say about\s+/i, '')
+      .replace(/^what is\s+/i, '')
+      .replace(/^who was\s+/i, '')
+      .replace(/^how should i\s+/i, '')
+      .replace(/[?.!]+$/g, '')
+      .trim();
+    const title = titleBase
+      ? titleBase.split(/\s+/).slice(0, 6).map((word, index) => {
+          if (!word) return '';
+          const lower = word.toLowerCase();
+          return index === 0 ? `${lower.charAt(0).toUpperCase()}${lower.slice(1)}` : lower;
+        }).join(' ')
+      : 'Bible Guidance';
+    const subtitleSource = assistantReply || cleanQuestion;
+    const subtitle = subtitleSource
+      .replace(/\*\*/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 110);
+    return {
+      title: title || 'Bible Guidance',
+      subtitle: subtitle && subtitle.toLowerCase() !== cleanQuestion.toLowerCase() ? subtitle : '',
+    };
+  }
+
+  async function summarizeAskChat(messages = []) {
+    if (API.hasWorker()) {
+      try {
+        const data = await API.summarizeAskBibleChat(messages);
+        const title = String(data?.title || '').trim();
+        if (title) {
+          return {
+            title,
+            subtitle: String(data?.subtitle || '').trim(),
+          };
+        }
+      } catch (_) {}
+    }
+    return buildFallbackAskSummary(messages);
+  }
+
   function togglePast(dateKey) {
     openPastDate = openPastDate === dateKey ? '' : dateKey;
+    render(document.getElementById('view-container'));
+  }
+
+  function toggleSavedChat(chatId) {
+    openPastChatId = openPastChatId === chatId ? '' : chatId;
     render(document.getElementById('view-container'));
   }
 
@@ -285,7 +393,7 @@ const JournalView = (() => {
     render(document.getElementById('view-container'));
     try {
       const result = await Sync.pushSavedDevotions();
-      alert(`Uploaded ${result.count || 0} saved devotionals, ${result.journals || 0} journal entries, and settings metadata.`);
+      alert(`Uploaded ${result.count || 0} saved devotionals, ${result.journals || 0} journal entries, ${result.askChats || 0} saved Bible chats, and settings metadata.`);
     } catch (err) {
       if (err.code === 'OFFLINE') { alert('No internet connection. Connect to sync.'); }
       else { alert(`Upload failed: ${err.message}`); }
@@ -305,7 +413,7 @@ const JournalView = (() => {
         alert('No synced Drive file found yet.');
         return;
       }
-      alert(`Downloaded ${result.importedLibrary || 0} saved devotionals, ${result.importedJournal || 0} journal entries, and settings metadata.`);
+      alert(`Downloaded ${result.importedLibrary || 0} saved devotionals, ${result.importedJournal || 0} journal entries, ${result.importedAskBibleChats || 0} saved Bible chats, and settings metadata.`);
     } catch (err) {
       if (err.code === 'OFFLINE') { alert('No internet connection. Connect to sync.'); }
       else { alert(`Download failed: ${err.message}`); }
@@ -315,16 +423,16 @@ const JournalView = (() => {
     }
   }
 
-  async function askDeleteScope(label = 'entry') {
+  async function askDeleteScope(label = 'entry', itemKind = 'journal entry') {
     const googleConnected = !!Store.get('googleProfile');
     return new Promise((resolve) => {
       const backdrop = document.createElement('div');
       backdrop.className = 'abide-delete-dialog-backdrop';
       backdrop.innerHTML = `
-        <div class="abide-delete-dialog" role="dialog" aria-modal="true" aria-label="Delete journal ${escapeAttr(label)}">
-          <div class="abide-delete-dialog__title">Delete journal ${escapeHtml(label)}?</div>
+        <div class="abide-delete-dialog" role="dialog" aria-modal="true" aria-label="Delete ${escapeAttr(itemKind)} ${escapeAttr(label)}">
+          <div class="abide-delete-dialog__title">Delete ${escapeHtml(itemKind)} ${escapeHtml(label)}?</div>
           <div class="abide-delete-dialog__body">
-            Choose where to remove this journal entry.
+            Choose where to remove this ${escapeHtml(itemKind)}.
           </div>
           <div class="abide-delete-dialog__actions">
             <button class="btn btn-secondary btn-sm" data-delete-action="cancel">Cancel</button>
@@ -353,7 +461,7 @@ const JournalView = (() => {
   async function deleteEntry(dateKey) {
     const key = String(dateKey || '').trim();
     if (!key) return;
-    const scope = await askDeleteScope('entry');
+    const scope = await askDeleteScope('entry', 'journal entry');
     if (!scope) return;
     const result = Store.deleteJournalEntry(key);
     if (!result.removed) {
@@ -371,10 +479,90 @@ const JournalView = (() => {
     render(document.getElementById('view-container'));
   }
 
+  function loadSavedChat(chatId) {
+    const chat = Store.getAskBibleChat(chatId);
+    if (!chat) {
+      alert('Could not load that saved chat.');
+      return;
+    }
+    _askHistory = Array.isArray(chat.messages) ? chat.messages.map(message => ({ role: message.role, content: message.content })) : [];
+    _askSavedChatId = chat.id;
+    _askDirty = false;
+    openPastChatId = chat.id;
+    render(document.getElementById('view-container'));
+    document.getElementById('journal-ask-input')?.focus();
+  }
+
+  function resetAskChat() {
+    if (_askLoading || savingAskChat) return;
+    _askHistory = [];
+    _askSavedChatId = '';
+    _askDirty = false;
+    render(document.getElementById('view-container'));
+    document.getElementById('journal-ask-input')?.focus();
+  }
+
+  async function saveAskChat() {
+    if (savingAskChat || _askLoading) return;
+    if (_askHistory.length < 2) {
+      alert('Ask at least one question before saving this chat.');
+      return;
+    }
+    savingAskChat = true;
+    render(document.getElementById('view-container'));
+    try {
+      const summary = await summarizeAskChat(_askHistory);
+      const saved = Store.saveAskBibleChat({
+        id: _askSavedChatId || '',
+        title: summary.title || 'Bible Guidance',
+        subtitle: summary.subtitle || '',
+        messages: _askHistory,
+        dateKey: DateUtils.today(),
+      });
+      if (!saved?.id) throw new Error('Could not save chat');
+      _askSavedChatId = saved.id;
+      _askDirty = false;
+      openPastChatId = saved.id;
+      haptic([8]);
+    } catch (err) {
+      alert(`Could not save this chat: ${err.message}`);
+    } finally {
+      savingAskChat = false;
+      render(document.getElementById('view-container'));
+    }
+  }
+
+  async function deleteAskChat(chatId) {
+    const key = String(chatId || '').trim();
+    if (!key) return;
+    const scope = await askDeleteScope('chat', 'saved chat');
+    if (!scope) return;
+    const result = Store.deleteAskBibleChat(key);
+    if (!result.removed) {
+      alert('Could not delete that saved chat.');
+      return;
+    }
+    if (_askSavedChatId === key) {
+      _askSavedChatId = '';
+      _askDirty = _askHistory.length > 0;
+    }
+    try {
+      if (scope === 'global') {
+        await Sync.pushSavedDevotions();
+      }
+    } catch (err) {
+      alert(`Deleted locally, but Drive sync failed: ${err.message}`);
+    }
+    if (openPastChatId === key) openPastChatId = '';
+    render(document.getElementById('view-container'));
+  }
+
   // ── Inline Ask the Bible panel ───────────────────────────────────────────
 
   let _askHistory = [];  // persists across journal re-renders
   let _askLoading = false;
+  let _askSavedChatId = '';
+  let _askDirty = false;
 
   function _escHtml(str) {
     return String(str)
@@ -403,6 +591,18 @@ const JournalView = (() => {
     conv.scrollTop = conv.scrollHeight;
   }
 
+  function _refreshAskControls() {
+    const saveBtn = document.getElementById('journal-ask-save-btn');
+    const resetBtn = document.getElementById('journal-ask-reset-btn');
+    const metaEl = document.getElementById('journal-ask-meta');
+    if (saveBtn) {
+      saveBtn.disabled = savingAskChat || _askLoading || _askHistory.length < 2;
+      saveBtn.textContent = savingAskChat ? 'Saving...' : (_askSavedChatId ? 'Update saved' : 'Save chat');
+    }
+    if (resetBtn) resetBtn.disabled = _askLoading || !_askHistory.length;
+    if (metaEl) metaEl.textContent = getAskMetaText();
+  }
+
   function _mountInlineAsk(root) {
     // Re-render any existing history
     if (_askHistory.length) {
@@ -429,9 +629,12 @@ const JournalView = (() => {
       input.value = '';
       _appendAskBubble('user', _escHtml(text));
       _askHistory.push({ role: 'user', content: text });
+      _askDirty = true;
+      _refreshAskControls();
 
       if (!API.hasWorker()) {
         _appendAskBubble('assistant', '<em>Worker URL not configured. Go to More → Settings → Advanced.</em>');
+        _refreshAskControls();
         return;
       }
 
@@ -446,6 +649,7 @@ const JournalView = (() => {
         const data = await API.askBibleQuestion(text, historyToSend);
         const reply = data.reply || "Sorry, I couldn't find an answer. Please try again.";
         _askHistory.push({ role: 'assistant', content: reply });
+        _askDirty = true;
         _appendAskBubble('assistant', _mdToHtml(reply));
       } catch (err) {
         _appendAskBubble('assistant', `<em>Error: ${_escHtml(err.message)}</em>`);
@@ -455,6 +659,7 @@ const JournalView = (() => {
         const ir = document.getElementById('journal-ask-input-row');
         if (le) le.hidden = true;
         if (ir) ir.style.opacity = '';
+        _refreshAskControls();
         input.focus();
       }
     }
@@ -468,9 +673,11 @@ const JournalView = (() => {
     root.querySelectorAll('#journal-ask-panel .ask-suggestion-chip').forEach(chip => {
       chip.addEventListener('click', () => { const q = chip.dataset.q; if (q) handleAskSend(q); });
     });
+
+    _refreshAskControls();
   }
 
-  return { render, saveEntry, usePrompt, togglePast, uploadHistory, downloadHistory, deleteEntry };
+  return { render, saveEntry, usePrompt, togglePast, toggleSavedChat, uploadHistory, downloadHistory, deleteEntry, saveAskChat, resetAskChat, loadSavedChat, deleteAskChat };
 })();
 
 window.JournalView = JournalView;

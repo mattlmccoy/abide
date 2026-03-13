@@ -18,7 +18,7 @@ A personal, offline-first Progressive Web App for daily Bible devotions. Built f
 - **Weekly plan builder** — AI-generates a full 7-day devotion plan from any topic
 - **8 theme palettes** — frosted-glass cards, ambient backgrounds, dark mode
 - **Push notifications** — optional morning and evening reminders (iOS 16.4+ PWA)
-- **Google Drive sync** — optional backup/restore for devotions, journals, and settings
+- **Google Drive sync** — optional backup/restore for devotions, journals, saved Bible chats, and settings
 - **Streak tracking** — daily consistency counter
 - **Fully offline** — Service Worker caches all assets; reads previously loaded scripture offline
 
@@ -309,13 +309,15 @@ Routing state is tracked in KV:
 
 ## Google Drive Sync
 
-Google Drive sync is **opt-in** and backs up three files to a private `abidefaith-docs` folder in your Drive:
+Google Drive sync is **opt-in** and backs up dedicated JSON files to a private `abidefaith-docs` folder in your Drive:
 
 | Drive File | Contents |
 |------------|----------|
-| `devotions.json` | Saved devotions library + current week plan |
-| `journals.json` | All journal entries |
-| `settings.json` | App settings + trusted pastor list |
+| `abide-devotions.json` | Saved devotions library |
+| `abide-journals.json` | All journal entries |
+| `abide-ask-chats.json` | Saved Ask the Bible conversations |
+| `abide-settings.json` | App settings + trusted pastor list |
+| `abide-plan.json` | Current week plan |
 
 ### Setup
 

@@ -6,6 +6,7 @@ const Sync = (() => {
   const LEGACY_FILE_NAME = 'abide-saved-devotions.json';
   const DEVOTIONS_FILE_NAME = 'abide-devotions.json';
   const JOURNALS_FILE_NAME = 'abide-journals.json';
+  const ASK_CHATS_FILE_NAME = 'abide-ask-chats.json';
   const SETTINGS_FILE_NAME = 'abide-settings.json';
   const HIGHLIGHTS_FILE_NAME = 'abide-highlights.json';
   const PROGRESS_FILE_NAME = 'abide-progress.json';
@@ -15,6 +16,7 @@ const Sync = (() => {
   const LEGACY_FOLDER_NAMES = ['abide-devotions', 'abide-devotions-docs', 'abidefaith'];
   const DEVOTIONS_FILE_CANDIDATES = [DEVOTIONS_FILE_NAME, 'abide-devotions', LEGACY_FILE_NAME, 'abide-saved-devotions'];
   const JOURNALS_FILE_CANDIDATES = [JOURNALS_FILE_NAME, 'abide-journals'];
+  const ASK_CHATS_FILE_CANDIDATES = [ASK_CHATS_FILE_NAME, 'abide-ask-chats'];
   const SETTINGS_FILE_CANDIDATES = [SETTINGS_FILE_NAME, 'abide-settings'];
   const HIGHLIGHTS_FILE_CANDIDATES = [HIGHLIGHTS_FILE_NAME, 'abide-highlights'];
   const PROGRESS_FILE_CANDIDATES = [PROGRESS_FILE_NAME, 'abide-progress'];
@@ -333,8 +335,10 @@ const Sync = (() => {
           journals: String(files.journals || ''),
           settings: String(files.settings || ''),
           shares: shareFolderId,
+          askChats: String(files.askChats || ''),
           highlights: String(files.highlights || ''),
           progress: String(files.progress || ''),
+          plan: String(files.plan || ''),
         },
       });
     }
@@ -812,6 +816,7 @@ const Sync = (() => {
   async function pushSavedDevotions() {
     const devotions = Store.exportDevotionsSnapshot();
     const journals = Store.exportJournalSnapshot();
+    const askChats = Store.exportAskBibleChatsSnapshot();
     const settings = Store.exportSettingsSnapshot();
     const highlights = Store.exportHighlightsSnapshot();
     const progress = Store.exportProgressSnapshot();
@@ -823,10 +828,11 @@ const Sync = (() => {
     if (!folderId) throw new Error('Could not create/find Google Drive folder');
 
     const state = Store.get();
-    const knownFiles = state.googleDriveFiles || { devotions: '', journals: '', settings: '', shares: '', highlights: '', progress: '', plan: '' };
-    const [devotionsFileId, journalsFileId, settingsFileId, highlightsFileId, progressFileId, planFileId] = await Promise.all([
+    const knownFiles = state.googleDriveFiles || { devotions: '', journals: '', settings: '', shares: '', askChats: '', highlights: '', progress: '', plan: '' };
+    const [devotionsFileId, journalsFileId, askChatsFileId, settingsFileId, highlightsFileId, progressFileId, planFileId] = await Promise.all([
       upsertJsonFile(folderId, DEVOTIONS_FILE_NAME, devotions, knownFiles.devotions || ''),
       upsertJsonFile(folderId, JOURNALS_FILE_NAME, journals, knownFiles.journals || ''),
+      upsertJsonFile(folderId, ASK_CHATS_FILE_NAME, askChats, knownFiles.askChats || ''),
       upsertJsonFile(folderId, SETTINGS_FILE_NAME, settings, knownFiles.settings || ''),
       upsertJsonFile(folderId, HIGHLIGHTS_FILE_NAME, highlights, knownFiles.highlights || ''),
       upsertJsonFile(folderId, PROGRESS_FILE_NAME, progress, knownFiles.progress || ''),
@@ -839,6 +845,7 @@ const Sync = (() => {
       googleDriveFiles: {
         devotions: devotionsFileId,
         journals: journalsFileId,
+        askChats: askChatsFileId,
         settings: settingsFileId,
         shares: String(knownFiles.shares || ''),
         highlights: highlightsFileId,
@@ -851,10 +858,11 @@ const Sync = (() => {
       fileId: devotionsFileId,
       count: (devotions.savedDevotions || []).length,
       journals: Object.keys(journals.journalEntries || {}).length,
+      askChats: Object.keys(askChats.askBibleChats || {}).length,
       pastors: Array.isArray(settings.trustedPastors) ? settings.trustedPastors.length : 0,
       highlights: Object.keys(highlights.verseHighlights || {}).length,
       progress: Object.keys(progress.readingProgress || {}).length,
-      files: 6,
+      files: 7,
     };
   }
 
@@ -863,19 +871,21 @@ const Sync = (() => {
     if (!folderId) return { fileId: '', count: 0, imported: false };
 
     const state = Store.get();
-    const knownFiles = state.googleDriveFiles || { devotions: '', journals: '', settings: '', shares: '', highlights: '', progress: '', plan: '' };
-    const [knownDevotions, knownJournals, knownSettings, knownHighlights, knownProgress, knownPlan] = await Promise.all([
+    const knownFiles = state.googleDriveFiles || { devotions: '', journals: '', settings: '', shares: '', askChats: '', highlights: '', progress: '', plan: '' };
+    const [knownDevotions, knownJournals, knownAskChats, knownSettings, knownHighlights, knownProgress, knownPlan] = await Promise.all([
       readJsonFileById(knownFiles.devotions || ''),
       readJsonFileById(knownFiles.journals || ''),
+      readJsonFileById(knownFiles.askChats || ''),
       readJsonFileById(knownFiles.settings || ''),
       readJsonFileById(knownFiles.highlights || ''),
       readJsonFileById(knownFiles.progress || ''),
       readJsonFileById(knownFiles.plan || ''),
     ]);
 
-    let [devotionsFile, journalsFile, settingsFile, highlightsFile, progressFile, planFile] = await Promise.all([
+    let [devotionsFile, journalsFile, askChatsFile, settingsFile, highlightsFile, progressFile, planFile] = await Promise.all([
       knownDevotions.found ? knownDevotions : readJsonFileByCandidates(folderId, DEVOTIONS_FILE_CANDIDATES),
       knownJournals.found ? knownJournals : readJsonFileByCandidates(folderId, JOURNALS_FILE_CANDIDATES),
+      knownAskChats.found ? knownAskChats : readJsonFileByCandidates(folderId, ASK_CHATS_FILE_CANDIDATES),
       knownSettings.found ? knownSettings : readJsonFileByCandidates(folderId, SETTINGS_FILE_CANDIDATES),
       knownHighlights.found ? knownHighlights : readJsonFileByCandidates(folderId, HIGHLIGHTS_FILE_CANDIDATES),
       knownProgress.found ? knownProgress : readJsonFileByCandidates(folderId, PROGRESS_FILE_CANDIDATES),
@@ -908,6 +918,7 @@ const Sync = (() => {
     let imported = false;
     let devResult = { count: 0, importedIds: 0, importedLibrary: 0, importedPlanDays: 0 };
     let journalResult = { importedJournal: 0 };
+    let askChatsResult = { importedAskBibleChats: 0 };
     let settingsResult = { importedSettings: false, importedPastors: 0 };
     let highlightsResult = { imported: 0 };
     let progressResult = { imported: 0 };
@@ -918,6 +929,10 @@ const Sync = (() => {
     }
     if (journalsFile.found && journalsFile.data && typeof journalsFile.data === 'object') {
       journalResult = Store.importJournalSnapshot(journalsFile.data || {});
+      imported = true;
+    }
+    if (askChatsFile.found && askChatsFile.data && typeof askChatsFile.data === 'object') {
+      askChatsResult = Store.importAskBibleChatsSnapshot(askChatsFile.data || {});
       imported = true;
     }
     if (settingsFile.found && settingsFile.data && typeof settingsFile.data === 'object') {
@@ -982,6 +997,7 @@ const Sync = (() => {
       googleDriveFiles: {
         devotions: devotionsFile.fileId || '',
         journals: journalsFile.fileId || '',
+        askChats: askChatsFile.fileId || '',
         settings: settingsFile.fileId || '',
         shares: String(knownFiles.shares || ''),
         highlights: highlightsFile.fileId || '',
@@ -996,6 +1012,7 @@ const Sync = (() => {
       importedIds: devResult.importedIds || 0,
       importedLibrary: devResult.importedLibrary || 0,
       importedJournal: journalResult.importedJournal || devResult.importedJournal || 0,
+      importedAskBibleChats: askChatsResult.importedAskBibleChats || 0,
       importedPastors: settingsResult.importedPastors || 0,
       importedPlanDays: devResult.importedPlanDays || 0,
       importedHighlights: highlightsResult.imported || 0,
@@ -1004,6 +1021,7 @@ const Sync = (() => {
       sourceFiles: {
         devotions: devotionsFile.fileName || '',
         journals: journalsFile.fileName || '',
+        askChats: askChatsFile.fileName || '',
         settings: settingsFile.fileName || '',
         highlights: highlightsFile.fileName || '',
         progress: progressFile.fileName || '',
@@ -1024,7 +1042,7 @@ const Sync = (() => {
       googleConnectedAt: null,
       googleDriveFolderId: null,
       googleDriveFileId: null,
-      googleDriveFiles: { devotions: '', journals: '', settings: '', shares: '', highlights: '', progress: '', plan: '' },
+      googleDriveFiles: { devotions: '', journals: '', settings: '', shares: '', askChats: '', highlights: '', progress: '', plan: '' },
     });
   }
 
@@ -1038,7 +1056,7 @@ const Sync = (() => {
       tokenExpiresInSec: _accessTokenExpiresAt ? Math.max(0, Math.round((_accessTokenExpiresAt - Date.now()) / 1000)) : 0,
       connectedProfile: !!state.googleProfile,
       googleDriveFolderId: state.googleDriveFolderId || '',
-      googleDriveFiles: state.googleDriveFiles || { devotions: '', journals: '', settings: '', shares: '' },
+      googleDriveFiles: state.googleDriveFiles || { devotions: '', journals: '', settings: '', shares: '', askChats: '', highlights: '', progress: '', plan: '' },
       lastDriveSyncAt: state.lastDriveSyncAt || null,
     };
   }

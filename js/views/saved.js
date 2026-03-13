@@ -391,7 +391,7 @@ const SavedView = (() => {
     render(document.getElementById('view-container'));
     try {
       const result = await Sync.pushSavedDevotions();
-      alert(`Uploaded ${result.count || 0} saved devotionals, ${result.journals || 0} journal entries, and settings metadata.`);
+      alert(`Uploaded ${result.count || 0} saved devotionals, ${result.journals || 0} journal entries, ${result.askChats || 0} saved Bible chats, and settings metadata.`);
     } catch (err) {
       if (err.code === 'OFFLINE') { alert('No internet connection. Connect to sync.'); }
       else { alert(`Upload failed: ${err.message}`); }
@@ -411,7 +411,7 @@ const SavedView = (() => {
         alert('No synced Drive file found yet.');
         return;
       }
-      alert(`Downloaded ${result.importedLibrary || 0} saved devotionals, ${result.importedJournal || 0} journal entries, and settings metadata.`);
+      alert(`Downloaded ${result.importedLibrary || 0} saved devotionals, ${result.importedJournal || 0} journal entries, ${result.importedAskBibleChats || 0} saved Bible chats, and settings metadata.`);
     } catch (err) {
       if (err.code === 'OFFLINE') { alert('No internet connection. Connect to sync.'); }
       else { alert(`Download failed: ${err.message}`); }

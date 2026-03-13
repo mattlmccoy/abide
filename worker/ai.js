@@ -879,6 +879,98 @@ ${topic}`;
 }
 
 // ---------------------------------------------------------------------------
+// POST /ai/chat-summary
+// Summarize an Ask the Bible conversation into a title/subtitle
+// ---------------------------------------------------------------------------
+export async function handleAIChatSummary(request, url, env, origin, json) {
+  if (request.method !== 'POST') return json({ error: 'POST required' }, 405, origin);
+
+  let body = {};
+  try { body = await request.json(); } catch {}
+  const messages = Array.isArray(body?.messages)
+    ? body.messages
+        .map((message) => ({
+          role: message?.role === 'user' ? 'user' : 'assistant',
+          content: String(message?.content || '').trim(),
+        }))
+        .filter((message) => message.content)
+        .slice(0, 24)
+    : [];
+  if (!messages.length) return json({ error: 'Missing messages' }, 400, origin);
+
+  const transcript = messages
+    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`)
+    .join('\n\n');
+
+  const systemPrompt = 'You summarize Christian Bible conversations into concise archive labels. Respond with valid JSON only.';
+  const userPrompt = `Create a title and optional subtitle for this saved "Ask the Bible" conversation.
+
+Rules:
+- Return JSON only as {"title":"...","subtitle":"..."}
+- Title should be 3 to 7 words
+- Subtitle should be blank unless it genuinely adds needed context
+- Keep wording pastoral, concrete, and natural
+- No quotation marks around the values
+- Do not mention "chat", "conversation", or "ask the bible"
+
+Transcript:
+${transcript}`;
+
+  const providerOrder = buildPlanProviderOrder(env).filter((p) => providerConfigured(env, p));
+  const providers = providerOrder.length ? providerOrder : ['gemini', 'openrouter', 'groq'];
+  let lastErr = null;
+
+  for (const provider of providers) {
+    try {
+      let response = null;
+      if (provider === 'gemini') {
+        response = await runGemini(env, {
+          systemPrompt,
+          userPrompt,
+          temperature: 0.2,
+          maxOutputTokens: 120,
+          jsonMode: true,
+          preferredModel: providerPreferredModel(env, provider) || '',
+        });
+      } else if (provider === 'openrouter') {
+        response = await runOpenRouter(env, {
+          systemPrompt,
+          userPrompt,
+          temperature: 0.2,
+          maxOutputTokens: 120,
+          jsonMode: true,
+          preferredModel: providerPreferredModel(env, provider) || '',
+        });
+      } else if (provider === 'groq') {
+        response = await runGroq(env, {
+          systemPrompt,
+          userPrompt,
+          temperature: 0.2,
+          maxOutputTokens: 120,
+          jsonMode: true,
+          preferredModel: providerPreferredModel(env, provider) || '',
+        });
+      }
+      const parsed = parseJsonBlock(response?.text || '');
+      const title = String(parsed?.title || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      const subtitle = String(parsed?.subtitle || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+      if (!title || title.split(/\s+/).length < 2) throw new Error('Invalid chat title');
+      return json({
+        ok: true,
+        title,
+        subtitle,
+        provider: response?.provider || provider,
+        model: response?.model || '',
+      }, 200, origin);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  return json({ error: lastErr?.message || 'Could not summarize chat' }, 500, origin);
+}
+
+// ---------------------------------------------------------------------------
 // POST /ai/context  { reference: string }
 // Returns short historical/cultural context for a Bible passage, cached 90 days
 // ---------------------------------------------------------------------------

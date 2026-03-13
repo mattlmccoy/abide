@@ -240,6 +240,19 @@ const API = (() => {
     return res.json();
   }
 
+  async function summarizeAskBibleChat(messages = []) {
+    const res = await fetch(`${workerUrl()}/ai/chat-summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    });
+    if (!res.ok) {
+      const detail = await readErrorMessage(res, 'Ask chat summary error');
+      throw new Error(detail);
+    }
+    return res.json();
+  }
+
   async function getAIProviders() {
     const res = await fetch(`${workerUrl()}/ai/providers`);
     if (!res.ok) {
@@ -463,6 +476,7 @@ const API = (() => {
     wordLookup,
     wordLookupPassage,
     askBibleQuestion,
+    summarizeAskBibleChat,
     getPassageContext,
     getPassageCrossRefs,
     getPassage_translation,

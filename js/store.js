@@ -40,6 +40,7 @@ const Store = (() => {
     pendingWeekPlan: null,    // { activationDate, createdAt, plan }
     planHistory: [],          // [{ id, savedAt, reason, plan, selectedDate, sessionOverride }]
     journalEntries: {},       // { 'YYYY-MM-DD': { prompt, text, savedAt } }
+    askBibleChats: {},        // { chatId: { id, title, subtitle, messages, createdAt, updatedAt, savedAt } }
     completedDevotions: [],   // ['YYYY-MM-DD-morning', 'YYYY-MM-DD-evening']
     savedDevotions: [],       // ['YYYY-MM-DD-morning', 'YYYY-MM-DD-evening']
     savedDevotionLibrary: {}, // { id: { ...devotion snapshot... } }
@@ -72,7 +73,7 @@ const Store = (() => {
     googleClientId: DEFAULT_GOOGLE_CLIENT_ID,
     googleDriveFolderId: '',
     googleDriveFileId: '',
-    googleDriveFiles: { devotions: '', journals: '', settings: '', shares: '' },
+    googleDriveFiles: { devotions: '', journals: '', settings: '', shares: '', askChats: '' },
     lastDriveSyncAt: null,
     googleProfile: null,      // { sub, email, name, picture }
     googleConnectedAt: null,
@@ -80,7 +81,7 @@ const Store = (() => {
     devotionLength: 'standard', // 'short' | 'standard' | 'long'
     verseHighlights: {},      // { 'BookName C:V': { color: '#hex', note: '' } }
     readingProgress: {},      // { 'BookName': [chapterNumbers...] }
-    _defaultsVersion: 3,
+    _defaultsVersion: 4,
   };
 
   let _state = null;
@@ -100,21 +101,26 @@ const Store = (() => {
       if (!_state.savedDevotionLibrary || typeof _state.savedDevotionLibrary !== 'object') {
         _state.savedDevotionLibrary = {};
       }
+      if (!_state.askBibleChats || typeof _state.askBibleChats !== 'object') {
+        _state.askBibleChats = {};
+      }
       _state.usageStats = normalizeUsageStats(_state.usageStats);
       _state.usageLimits = normalizeUsageLimits(_state.usageLimits);
       if (!_state.googleClientId || !_state.googleClientId.trim()) {
         _state.googleClientId = DEFAULT_GOOGLE_CLIENT_ID;
       }
       if (!_state.googleDriveFiles || typeof _state.googleDriveFiles !== 'object') {
-        _state.googleDriveFiles = { devotions: '', journals: '', settings: '', shares: '', highlights: '', progress: '' };
+        _state.googleDriveFiles = { devotions: '', journals: '', settings: '', shares: '', askChats: '', highlights: '', progress: '', plan: '' };
       } else {
         _state.googleDriveFiles = {
           devotions: String(_state.googleDriveFiles.devotions || ''),
           journals: String(_state.googleDriveFiles.journals || ''),
           settings: String(_state.googleDriveFiles.settings || ''),
           shares: String(_state.googleDriveFiles.shares || ''),
+          askChats: String(_state.googleDriveFiles.askChats || ''),
           highlights: String(_state.googleDriveFiles.highlights || ''),
           progress: String(_state.googleDriveFiles.progress || ''),
+          plan: String(_state.googleDriveFiles.plan || ''),
         };
       }
       if (Number(_state._defaultsVersion || 0) < 3) {
@@ -127,6 +133,10 @@ const Store = (() => {
           migrated = true;
         }
         _state._defaultsVersion = 3;
+        migrated = true;
+      }
+      if (Number(_state._defaultsVersion || 0) < 4) {
+        _state._defaultsVersion = 4;
         migrated = true;
       }
     } catch (e) {
@@ -296,6 +306,76 @@ const Store = (() => {
     const key = String(dateKey || '').trim();
     if (!key || !_state.journalEntries || !_state.journalEntries[key]) return { removed: 0 };
     delete _state.journalEntries[key];
+    save();
+    return { removed: 1 };
+  }
+
+  function normalizeAskBibleMessage(message = {}, fallbackRole = 'assistant') {
+    const role = message?.role === 'user' ? 'user' : fallbackRole;
+    const content = String(message?.content || '').trim();
+    return content ? { role, content } : null;
+  }
+
+  function normalizeAskBibleChat(chat = {}, fallbackId = '') {
+    const id = String(chat?.id || fallbackId || '').trim();
+    if (!id) return null;
+    const rawMessages = Array.isArray(chat?.messages) ? chat.messages : [];
+    const messages = rawMessages
+      .map((message) => normalizeAskBibleMessage(message, message?.role === 'user' ? 'user' : 'assistant'))
+      .filter(Boolean);
+    if (!messages.length) return null;
+    const createdAt = String(chat?.createdAt || chat?.savedAt || chat?.updatedAt || new Date().toISOString());
+    const updatedAt = String(chat?.updatedAt || chat?.savedAt || createdAt);
+    return {
+      id,
+      title: String(chat?.title || '').trim(),
+      subtitle: String(chat?.subtitle || '').trim(),
+      createdAt,
+      updatedAt,
+      savedAt: String(chat?.savedAt || updatedAt || createdAt),
+      dateKey: String(chat?.dateKey || '').trim() || DateUtils.toKey(new Date(createdAt)),
+      messages,
+    };
+  }
+
+  function saveAskBibleChat(chat = {}) {
+    if (!_state.askBibleChats || typeof _state.askBibleChats !== 'object') _state.askBibleChats = {};
+    const fallbackId = String(chat?.id || `ask-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`).trim();
+    const existing = _state.askBibleChats[fallbackId];
+    const normalized = normalizeAskBibleChat({
+      ...existing,
+      ...chat,
+      id: fallbackId,
+      createdAt: chat?.createdAt || existing?.createdAt || new Date().toISOString(),
+      updatedAt: chat?.updatedAt || new Date().toISOString(),
+      savedAt: new Date().toISOString(),
+    }, fallbackId);
+    if (!normalized) return null;
+    _state.askBibleChats[fallbackId] = normalized;
+    save();
+    return cloneValue(normalized);
+  }
+
+  function getAskBibleChat(chatId) {
+    const key = String(chatId || '').trim();
+    if (!key) return null;
+    return cloneValue(_state.askBibleChats?.[key] || null);
+  }
+
+  function getAllAskBibleChats() {
+    const chats = _state.askBibleChats && typeof _state.askBibleChats === 'object'
+      ? _state.askBibleChats
+      : {};
+    return Object.values(chats)
+      .map(chat => cloneValue(chat))
+      .filter(Boolean)
+      .sort((a, b) => String(b.updatedAt || b.savedAt || '').localeCompare(String(a.updatedAt || a.savedAt || '')));
+  }
+
+  function deleteAskBibleChat(chatId) {
+    const key = String(chatId || '').trim();
+    if (!key || !_state.askBibleChats || !_state.askBibleChats[key]) return { removed: 0 };
+    delete _state.askBibleChats[key];
     save();
     return { removed: 1 };
   }
@@ -1125,6 +1205,36 @@ const Store = (() => {
     };
   }
 
+  function exportAskBibleChatsSnapshot() {
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      askBibleChats: _state.askBibleChats || {},
+    };
+  }
+
+  function importAskBibleChatsSnapshot(snapshot = {}) {
+    const incomingChats = snapshot.askBibleChats && typeof snapshot.askBibleChats === 'object'
+      ? snapshot.askBibleChats
+      : {};
+    const currentChats = _state.askBibleChats && typeof _state.askBibleChats === 'object'
+      ? _state.askBibleChats
+      : {};
+    Object.entries(incomingChats).forEach(([chatId, chat]) => {
+      const normalized = normalizeAskBibleChat(chat, chatId);
+      if (!normalized) return;
+      const existing = currentChats[normalized.id];
+      const incomingStamp = String(normalized.updatedAt || normalized.savedAt || '');
+      const existingStamp = String(existing?.updatedAt || existing?.savedAt || '');
+      if (!existing || incomingStamp > existingStamp) {
+        currentChats[normalized.id] = normalized;
+      }
+    });
+    _state.askBibleChats = currentChats;
+    save();
+    return { importedAskBibleChats: Object.keys(incomingChats).length };
+  }
+
   function importJournalSnapshot(snapshot = {}) {
     const incomingJournal = snapshot.journalEntries && typeof snapshot.journalEntries === 'object'
       ? snapshot.journalEntries
@@ -1383,6 +1493,10 @@ const Store = (() => {
     getJournalEntry,
     getRecentJournalEntries,
     getAllJournalEntries,
+    saveAskBibleChat,
+    getAskBibleChat,
+    getAllAskBibleChats,
+    deleteAskBibleChat,
     savePlan,
     queuePlanForDate,
     getPendingPlanInfo,
@@ -1412,6 +1526,8 @@ const Store = (() => {
     importPlanSnapshot,
     exportJournalSnapshot,
     importJournalSnapshot,
+    exportAskBibleChatsSnapshot,
+    importAskBibleChatsSnapshot,
     exportSettingsSnapshot,
     importSettingsSnapshot,
     getTrustedPastors,

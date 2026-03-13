@@ -519,7 +519,7 @@ const HomeView = (() => {
   async function syncSavedNow() {
     try {
       const result = await Sync.pushSavedDevotions();
-      alert(`Uploaded ${result.count || 0} saved devotionals, ${result.journals || 0} journal entries, and settings metadata to Google Drive.`);
+      alert(`Uploaded ${result.count || 0} saved devotionals, ${result.journals || 0} journal entries, ${result.askChats || 0} saved Bible chats, and settings metadata to Google Drive.`);
     } catch (err) {
       alert(`Upload failed: ${err.message}`);
     }
@@ -532,7 +532,7 @@ const HomeView = (() => {
         alert('No synced Drive file found yet.');
         return;
       }
-      alert(`Downloaded ${result.importedLibrary || 0} saved devotionals, ${result.importedJournal || 0} journal entries, and settings metadata.`);
+      alert(`Downloaded ${result.importedLibrary || 0} saved devotionals, ${result.importedJournal || 0} journal entries, ${result.importedAskBibleChats || 0} saved Bible chats, and settings metadata.`);
     } catch (err) {
       if (err.code === 'AUTH_EXPIRED') {
         const vc = document.getElementById('view-container');
@@ -746,7 +746,7 @@ const HomeView = (() => {
       {
         route: '/', selector: '#home-google-btn', calloutPos: 'below', highlightPadding: 10,
         title: 'Google Sync & Profile',
-        body: "Tap your avatar/Google icon to connect Drive, then upload/download devotions, journal entries, and settings metadata across devices.",
+        body: "Tap your avatar/Google icon to connect Drive, then upload/download devotions, journal entries, saved Bible chats, and settings metadata across devices.",
       },
       {
         route: '/', selector: '#home-session-toggle', calloutPos: 'below', highlightPadding: 10,

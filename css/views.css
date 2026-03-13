@@ -643,6 +643,65 @@
   white-space: pre-wrap;
 }
 
+.journal-saved-chat__title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
+}
+
+.journal-saved-chat__subtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.journal-saved-chat__messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.journal-saved-chat__message {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+}
+
+.journal-saved-chat__role {
+  display: inline-block;
+  min-width: 44px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.journal-ask-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+
+.journal-ask-actions__meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.journal-ask-actions__buttons {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 /* --- PLAN VIEW --- */
 .plan-topics {
   display: grid;
