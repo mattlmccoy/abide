@@ -436,28 +436,31 @@ const SettingsView = (() => {
       }
 
       try {
-        const reg = await navigator.serviceWorker.ready;
-        await reg.update();
+        const check = typeof window.__ABIDE_CHECK_FOR_UPDATES__ === 'function'
+          ? await window.__ABIDE_CHECK_FOR_UPDATES__({ aggressive: true, forceReloadFallback: true })
+          : { status: 'current', version: window.__ABIDE_VERSION__ || 'current' };
 
-        if (reg.waiting || reg.installing) {
-          // A new SW was found — it will activate, write the meta cache stamp,
-          // and the visibilitychange handler will reload the page automatically.
-          statusEl.textContent = 'Update found — applying now…';
+        if (check.status === 'updating' || check.status === 'forcing-reload') {
+          statusEl.textContent = `Update found${check.liveVersion ? ` (${check.liveVersion})` : ''} — applying now…`;
           btn.textContent = 'Updating…';
-          // Nudge it to skip waiting immediately rather than waiting for a restart.
-          const sw = reg.waiting || reg.installing;
-          sw.postMessage({ type: 'SKIP_WAITING' });
-          setTimeout(() => window.location.reload(), 1400);
-        } else {
-          const v = window.__ABIDE_VERSION__ || 'current';
-          statusEl.textContent = `You're on the latest version (${v}).`;
-          btn.textContent = 'Up to date ✓';
-          setTimeout(() => {
-            btn.disabled = false;
-            btn.textContent = 'Check for Updates';
-            statusEl.textContent = '';
-          }, 2800);
+          return;
         }
+
+        if (check.status === 'detected') {
+          statusEl.textContent = `New version detected${check.liveVersion ? ` (${check.liveVersion})` : ''} — retrying update…`;
+          btn.textContent = 'Updating…';
+          setTimeout(() => window.location.reload(), 1600);
+          return;
+        }
+
+        const v = window.__ABIDE_VERSION__ || 'current';
+        statusEl.textContent = `You're on the latest version (${v}).`;
+        btn.textContent = 'Up to date ✓';
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.textContent = 'Check for Updates';
+          statusEl.textContent = '';
+        }, 2800);
       } catch (err) {
         console.warn('[Abide] Update check failed:', err);
         statusEl.textContent = 'Could not check for updates. Try again when online.';

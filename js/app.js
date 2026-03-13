@@ -4,7 +4,7 @@
 
 (function () {
   'use strict';
-  const APP_VERSION = '2026.03.13.2';
+  const APP_VERSION = '2026.03.13.3';
   window.__ABIDE_VERSION__ = APP_VERSION;
   window.__ABIDE_SW_VERSION__ = `v${APP_VERSION}`;
 
@@ -60,6 +60,111 @@
       }
     }
 
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function readCachedSwVersion() {
+      if (!('caches' in window)) return '';
+      try {
+        const cache = await caches.open('abide-meta');
+        const resp = await cache.match('sw-version');
+        return resp ? await resp.text() : '';
+      } catch (_) {
+        return '';
+      }
+    }
+
+    async function fetchLiveSwVersion() {
+      const res = await fetch(`${basePath}sw.js?live=${Date.now()}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) throw new Error(`SW version fetch failed (${res.status})`);
+      const text = await res.text();
+      const match = text.match(/const\s+SW_VERSION\s*=\s*['"]([^'"]+)['"]/);
+      return match ? String(match[1] || '').trim() : '';
+    }
+
+    async function waitForWaitingWorker(reg, timeoutMs = 3200) {
+      if (reg.waiting) return reg.waiting;
+      const installing = reg.installing;
+      if (!installing) {
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            reg.removeEventListener('updatefound', onUpdateFound);
+            resolve(reg.waiting || null);
+          }, timeoutMs);
+
+          function onUpdateFound() {
+            const next = reg.installing;
+            if (!next) return;
+            next.addEventListener('statechange', () => {
+              if (next.state === 'installed') {
+                clearTimeout(timer);
+                reg.removeEventListener('updatefound', onUpdateFound);
+                resolve(reg.waiting || next);
+              }
+            });
+          }
+
+          reg.addEventListener('updatefound', onUpdateFound);
+        });
+      }
+
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(reg.waiting || null), timeoutMs);
+        installing.addEventListener('statechange', () => {
+          if (installing.state === 'installed') {
+            clearTimeout(timer);
+            resolve(reg.waiting || installing);
+          }
+        });
+      });
+    }
+
+    async function checkForSwUpdate(reg, options = {}) {
+      const aggressive = options.aggressive === true;
+      const forceReloadFallback = options.forceReloadFallback === true;
+      if (swReloading) return { status: 'reloading', version: window.__ABIDE_SW_VERSION__ };
+
+      const localVersion = window.__ABIDE_SW_VERSION__ || '';
+      let liveVersion = '';
+      try {
+        liveVersion = await fetchLiveSwVersion();
+      } catch (_) {}
+
+      try {
+        await reg.update();
+      } catch (_) {}
+
+      const waitingWorker = await waitForWaitingWorker(reg, aggressive ? 4200 : 1800);
+      if (waitingWorker) {
+        try { waitingWorker.postMessage({ type: 'SKIP_WAITING' }); } catch (_) {}
+        await sleep(aggressive ? 1800 : 800);
+      }
+
+      const cachedVersion = await readCachedSwVersion();
+      if (cachedVersion && cachedVersion !== localVersion) {
+        reloadForUpdate();
+        return { status: 'updating', version: cachedVersion, liveVersion: liveVersion || cachedVersion };
+      }
+
+      if (liveVersion && liveVersion !== localVersion) {
+        if (forceReloadFallback) {
+          try { await reg.unregister(); } catch (_) {}
+          window.location.replace(`${basePath}?update=${Date.now()}`);
+          return { status: 'forcing-reload', version: localVersion, liveVersion };
+        }
+        return { status: 'detected', version: localVersion, liveVersion };
+      }
+
+      return { status: 'current', version: localVersion, liveVersion: liveVersion || localVersion };
+    }
+
+    window.__ABIDE_CHECK_FOR_UPDATES__ = (options = {}) =>
+      navigator.serviceWorker.ready.then(reg => checkForSwUpdate(reg, options));
+
     // Primary path: new SW sends SW_UPDATED via postMessage after clients.claim().
     // More reliable on iOS Safari than waiting for the controllerchange event.
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -76,20 +181,6 @@
     //     the app was backgrounded (JS was suspended, so SW_UPDATED was never received).
     //     The SW writes its version to 'abide-meta' on every activate; comparing that
     //     to the version baked into this page detects staleness without any message.
-    function checkForSwUpdate(reg) {
-      if (swReloading) return;
-      reg.update().catch(() => {});
-      if ('caches' in window) {
-        caches.open('abide-meta')
-          .then(cache  => cache.match('sw-version'))
-          .then(resp   => resp ? resp.text() : null)
-          .then(cachedVer => {
-            if (cachedVer && cachedVer !== window.__ABIDE_SW_VERSION__) reloadForUpdate();
-          })
-          .catch(() => {});
-      }
-    }
-
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
       navigator.serviceWorker.ready.then(reg => checkForSwUpdate(reg)).catch(() => {});
@@ -107,8 +198,9 @@
     })
       .then(reg => {
         console.log('[Abide] SW registered:', reg.scope);
-        // Proactively check for an updated SW every time the app loads.
-        reg.update().catch(() => {});
+        // Proactively check the live SW version on every load rather than
+        // waiting for iOS to decide when to revalidate the worker script.
+        checkForSwUpdate(reg).catch(() => {});
       })
       .catch(err => {
         console.warn('[Abide] SW registration failed:', err);

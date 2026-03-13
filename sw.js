@@ -3,7 +3,7 @@
    Caching strategy + push notification handler
    ============================================================ */
 
-const SW_VERSION = 'v2026.03.13.2';
+const SW_VERSION = 'v2026.03.13.3';
 const STATIC_CACHE = `${SW_VERSION}-static`;
 const CONTENT_CACHE = `${SW_VERSION}-content`;
 const BASE_PATH = self.location.pathname.replace(/\/sw\.js$/, '/');
