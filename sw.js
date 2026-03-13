@@ -3,7 +3,7 @@
    Caching strategy + push notification handler
    ============================================================ */
 
-const SW_VERSION = 'abide-v79';
+const SW_VERSION = 'abide-v80';
 const STATIC_CACHE = `${SW_VERSION}-static`;
 const CONTENT_CACHE = `${SW_VERSION}-content`;
 const BASE_PATH = self.location.pathname.replace(/\/sw\.js$/, '/');
@@ -12,7 +12,7 @@ const p = (path = '') => `${BASE_PATH}${path}`;
 // Shown as an OS notification when this SW update activates on a device that
 // already had a previous version installed. Keep it to one sentence — it
 // appears in the system notification tray.
-const SW_RELEASE_NOTES = 'Pull-to-refresh now safely uploads your data before downloading, and you\'ll see a sign-in prompt if your session expires.';
+const SW_RELEASE_NOTES = 'New: quickly switch Bible translations from the Scripture tab — tap the book icon next to reading progress.';
 
 const STATIC_ASSETS = [
   p(''),

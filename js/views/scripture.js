@@ -78,6 +78,13 @@ const ScriptureView = (() => {
   function render(container) {
     Router.setTitle('Scripture');
     Router.setHeaderActions(`
+      <div style="position:relative;">
+        <button class="header-action-btn" id="translation-picker-btn" aria-label="Bible Translation" title="Bible Translation">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+        </button>
+      </div>
       <button class="header-action-btn" aria-label="Reading Progress" onclick="Router.navigate('/progress')" title="Reading Progress">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
@@ -146,6 +153,7 @@ const ScriptureView = (() => {
 
     setupModeToggle(div);
     setupSearch(div);
+    setupTranslationPicker();
 
     if (currentRef) {
       loadPassage(currentRef);
@@ -378,6 +386,83 @@ const ScriptureView = (() => {
     const idx = label.toLowerCase().indexOf(q.toLowerCase());
     if (idx === -1) return label;
     return label.slice(0, idx) + `<strong>${label.slice(idx, idx + q.length)}</strong>` + label.slice(idx + q.length);
+  }
+
+  // --- Translation picker ---
+
+  const TRANSLATION_OPTIONS = [
+    { id: 'web', label: 'WEB', name: 'World English Bible' },
+    { id: 'esv', label: 'ESV', name: 'English Standard Version' },
+    { id: 'niv', label: 'NIV', name: 'New International Version' },
+    { id: 'nlt', label: 'NLT', name: 'New Living Translation' },
+    { id: 'bsb', label: 'BSB', name: 'Berean Standard Bible' },
+    { id: 'lsv', label: 'LSV', name: 'Literal Standard Version' },
+    { id: 'kjv', label: 'KJV', name: 'King James Version' },
+    { id: 'asv', label: 'ASV', name: 'American Standard Version' },
+    { id: 'bbe', label: 'BBE', name: 'Bible in Basic English' },
+    { id: 'darby', label: 'DARBY', name: 'Darby Translation' },
+  ];
+
+  function setupTranslationPicker() {
+    const btn = document.getElementById('translation-picker-btn');
+    if (!btn) return;
+    const anchor = btn.parentElement; // the position:relative wrapper
+
+    let popover = null;
+
+    function close() {
+      if (popover) { popover.remove(); popover = null; }
+      document.removeEventListener('keydown', onEsc);
+    }
+
+    function onEsc(e) { if (e.key === 'Escape') close(); }
+
+    function open() {
+      if (popover) { close(); return; }
+
+      const current = API.bibleTranslation();
+      popover = document.createElement('div');
+      popover.className = 'translation-popover';
+
+      popover.innerHTML = TRANSLATION_OPTIONS.map(t => `
+        <button class="translation-popover__item ${t.id === current ? 'translation-popover__item--active' : ''}" data-tid="${t.id}">
+          <span class="translation-popover__abbr">${t.label}</span>
+          <span class="translation-popover__name">${t.name}</span>
+          ${t.id === current ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
+        </button>
+      `).join('');
+
+      anchor.appendChild(popover);
+
+      popover.addEventListener('click', (e) => {
+        const item = e.target.closest('[data-tid]');
+        if (!item) return;
+        const tid = item.getAttribute('data-tid');
+        close();
+        if (tid !== current) {
+          Store.set('bibleTranslation', tid);
+          // Reload current passage in new translation
+          if (currentRef) loadPassage(currentRef);
+        }
+      });
+
+      document.addEventListener('keydown', onEsc);
+
+      // Close on outside click (next tick so this click doesn't immediately close)
+      setTimeout(() => {
+        document.addEventListener('click', function outsideClick(e) {
+          if (!popover || !popover.contains(e.target) && e.target !== btn) {
+            close();
+          }
+          document.removeEventListener('click', outsideClick);
+        });
+      }, 0);
+    }
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      open();
+    });
   }
 
   // --- Passage loading ---

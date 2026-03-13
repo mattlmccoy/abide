@@ -1317,7 +1317,7 @@ export async function handleAIPlan(request, url, env, origin, json) {
 
   const pastorKey = pastors.map(p => p.toLowerCase().trim()).sort().join('|');
   const lengthKey = `${cfg.minMorningWords}-${cfg.minEveningWords}-${cfg.minMorningParagraphs}-${cfg.minEveningParagraphs}-${daysCount}`;
-  const cacheKey = `plan:ai:v5:${topic.toLowerCase().trim()}:${pastorKey}:${lengthKey}`;
+  const cacheKey = `plan:ai:v6:${topic.toLowerCase().trim()}:${pastorKey}:${lengthKey}`;
   if (env.ABIDE_KV) {
     const cached = await env.ABIDE_KV.get(cacheKey, 'json');
     if (cached) return json(cached, 200, origin);
@@ -1333,8 +1333,32 @@ You MUST respond with valid JSON only — no markdown, no code blocks, no extra 
     ? `\nTrusted pastors to draw from: ${pastors.join(', ')}.`
     : '\nTrusted pastors to draw from: Tim Keller, John Mark Comer, Jon Pokluda, Louie Giglio, John Piper, Ben Stuart.';
 
-  const buildDayPrompt = (dayIndex, retryNote = '') => `Write day ${dayIndex + 1} of a ${daysCount}-day personal Bible devotional plan on the theme: "${topic}".${pastorLine}
+  const buildDayPrompt = (dayIndex, priorDays = [], retryNote = '') => {
+    let priorContext = '';
+    if (priorDays.length > 0) {
+      const usedRefs = priorDays.map((d, i) =>
+        `- Day ${i + 1} Morning: ${d.morning?.scripture_ref || '(none)'}, Evening: ${d.evening?.scripture_ref || '(none)'}`
+      );
+      const usedTitles = priorDays.map((d, i) =>
+        `- Day ${i + 1}: "${d.title || `Day ${i + 1}`}"`
+      );
+      priorContext = `
 
+CRITICAL — Previously used scripture references (you MUST NOT reuse any of these):
+${usedRefs.join('\n')}
+
+Previously used day titles/themes (vary your approach, explore a different facet):
+${usedTitles.join('\n')}
+
+Requirements for variety:
+- Pick a scripture from a DIFFERENT book of the Bible than all previous days if possible.
+- Do NOT repeat the same theological angle or application as a previous day.
+- Vary your opening sentence style — do NOT start with "As we..." or any phrase similar to a previous day's opening.
+- Each day should feel distinct in tone, structure, and scriptural focus.`;
+    }
+
+    return `Write day ${dayIndex + 1} of a ${daysCount}-day personal Bible devotional plan on the theme: "${topic}".${pastorLine}
+${priorContext}
 Return ONLY this exact JSON structure (no markdown fences, no explanation, just raw JSON):
 {
   "dayIndex": ${dayIndex},
@@ -1371,6 +1395,7 @@ Evening body: at least ${cfg.minEveningParagraphs} paragraphs and at least ${cfg
 Use a unique scripture reference for this day that differs from other days in the same week.
 Ensure valid JSON only.
 Do not include trailing commas. Escape quotes inside strings. Do not include markdown.${retryNote ? `\n\nRETRY REQUIREMENT: ${retryNote}` : ''}`;
+  };
 
   function normalizeSession(session, fallbackRef, fallbackParagraphs) {
     const normalized = (session && typeof session === 'object') ? { ...session } : {};
@@ -1438,7 +1463,7 @@ Do not include trailing commas. Escape quotes inside strings. Do not include mar
     const routingState = await loadRoutingState(env);
 
     for (let dayIndex = 0; dayIndex < daysCount; dayIndex++) {
-      const dayCacheKey = `plan-day:ai:v2:${topic.toLowerCase().trim()}:${pastorKey}:${cfg.minMorningWords}-${cfg.minEveningWords}-${cfg.minMorningParagraphs}-${cfg.minEveningParagraphs}:d${dayIndex + 1}`;
+      const dayCacheKey = `plan-day:ai:v3:${topic.toLowerCase().trim()}:${pastorKey}:${cfg.minMorningWords}-${cfg.minEveningWords}-${cfg.minMorningParagraphs}-${cfg.minEveningParagraphs}:d${dayIndex + 1}`;
       if (env.ABIDE_KV) {
         const cachedDay = await env.ABIDE_KV.get(dayCacheKey, 'json');
         if (cachedDay && typeof cachedDay === 'object') {
@@ -1453,6 +1478,7 @@ Do not include trailing commas. Escape quotes inside strings. Do not include mar
       let lastDayErr = null;
       let dayRetryReason = retryReason;
       let dayModel = '';
+      const dayTemp = 0.6 + (dayIndex * 0.025); // Day 0: 0.6 → Day 6: 0.75
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
@@ -1465,8 +1491,8 @@ Do not include trailing commas. Escape quotes inside strings. Do not include mar
               if (provider === 'gemini') {
                 response = await runGemini(env, {
                   systemPrompt,
-                  userPrompt: buildDayPrompt(dayIndex, dayRetryReason),
-                  temperature: 0.6,
+                  userPrompt: buildDayPrompt(dayIndex, days, dayRetryReason),
+                  temperature: dayTemp,
                   maxOutputTokens: 4096,
                   jsonMode: true,
                   preferredModel: env.GEMINI_PLAN_MODEL || env.GEMINI_MODEL || '',
@@ -1474,8 +1500,8 @@ Do not include trailing commas. Escape quotes inside strings. Do not include mar
               } else if (provider === 'openrouter') {
                 response = await runOpenRouter(env, {
                   systemPrompt,
-                  userPrompt: buildDayPrompt(dayIndex, dayRetryReason),
-                  temperature: 0.6,
+                  userPrompt: buildDayPrompt(dayIndex, days, dayRetryReason),
+                  temperature: dayTemp,
                   maxOutputTokens: 4096,
                   jsonMode: true,
                   preferredModel: env.OPENROUTER_PLAN_MODEL || env.OPENROUTER_MODEL || '',
@@ -1483,8 +1509,8 @@ Do not include trailing commas. Escape quotes inside strings. Do not include mar
               } else if (provider === 'groq') {
                 response = await runGroq(env, {
                   systemPrompt,
-                  userPrompt: buildDayPrompt(dayIndex, dayRetryReason),
-                  temperature: 0.6,
+                  userPrompt: buildDayPrompt(dayIndex, days, dayRetryReason),
+                  temperature: dayTemp,
                   maxOutputTokens: 4096,
                   jsonMode: true,
                   preferredModel: env.GROQ_PLAN_MODEL || env.GROQ_MODEL || '',
@@ -1551,20 +1577,22 @@ Do not include trailing commas. Escape quotes inside strings. Do not include mar
       throw new Error(`Plan too short: ${lengthIssues.slice(0, 4).join('; ')}`);
     }
 
-    // Ensure scripture refs are unique enough; if duplicates remain, patch them with fallback refs.
+    // Log duplicate scripture refs for monitoring — do NOT swap refs, as that
+    // causes a mismatch between the splash verse and the body content.
+    // Prior-day context in the prompt should prevent most duplicates.
     const seenMorning = new Set();
     const seenEvening = new Set();
     days.forEach((day, idx) => {
       const m = (day.morning?.scripture_ref || '').toLowerCase();
       const e = (day.evening?.scripture_ref || '').toLowerCase();
       if (seenMorning.has(m)) {
-        day.morning.scripture_ref = FALLBACK_REFS[idx % FALLBACK_REFS.length];
-      } else {
+        console.warn(`Plan dedup: duplicate morning ref "${day.morning.scripture_ref}" on day ${idx + 1}`);
+      } else if (m) {
         seenMorning.add(m);
       }
       if (seenEvening.has(e)) {
-        day.evening.scripture_ref = FALLBACK_REFS[(idx + 4) % FALLBACK_REFS.length];
-      } else {
+        console.warn(`Plan dedup: duplicate evening ref "${day.evening.scripture_ref}" on day ${idx + 1}`);
+      } else if (e) {
         seenEvening.add(e);
       }
     });
