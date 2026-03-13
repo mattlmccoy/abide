@@ -344,12 +344,12 @@ git push origin main
 
 ### Service Worker Versioning
 
-The SW version is hardcoded in `sw.js`:
+The SW version is hardcoded in `sw.js` and should be bumped on every pushed release:
 ```javascript
-const SW_VERSION = 'abide-v27';
+const SW_VERSION = 'v2026.03.13.1';
 ```
 
-Bump this string whenever you want all clients to receive a fresh cache. The activate handler automatically deletes old versioned caches.
+Bump this string whenever you push new changes so all clients receive a fresh cache. The activate handler automatically deletes old versioned caches.
 
 The app version in `app.js` follows the scheme `YYYY.MM.DD.patch`:
 ```javascript
